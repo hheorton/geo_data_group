@@ -11,6 +11,7 @@ from invoke import run
 from netCDF4 import Dataset
 from numba import jit
 from scipy import stats
+from scipy.ndimage.filters import gaussian_filter
 import data_year as dy
 from dateutil.relativedelta import relativedelta
 from mpl_toolkits.basemap import Basemap
@@ -300,6 +301,68 @@ def geo_gradient(array,grid_set):
             array[:,j],temp_space)
         return out_Dax,out_Day
     
+def de_ripple(array1,array2,rip_filt_std = 1,filt_ring_sig = 5,force_zero = False):
+    # find the ripples by subtracting the arrays
+    ripples = array1 - array2
+    # fast fourier transform the difference
+    rip_spec  = np.fft.fft2(np.double(ripples))
+    rip_spec2 = np.fft.fftshift(rip_spec)
+    # find the ring sprectrum the contains the ripples
+    filt_ring = np.ones_like(array1)
+    spec_r = np.mean(rip_spec2) + rip_filt_std*np.std(rip_spec2)
+    filt_ring[rip_spec2>spec_r] = 0.0
+    filt_ring = gaussian_filter(filt_ring,sigma = filt_ring_sig)
+    if not type(force_zero) == bool:
+        filt_ring[rip_spec2>spec_r] = filt_ring[rip_spec2>spec_r]*force_zero  
+    # use this filter ring to remove the array1 fft spectrum
+    a1_spec  = np.fft.fft2(np.double(array1))
+    a1_spec2 = np.fft.fftshift(a1_spec)
+    a1_spec2 = a1_spec2*filt_ring
+    back = np.real(np.fft.ifft2(np.fft.ifftshift(a1_spec2)))
+    return back
+
+def geo_filter(array,grid_set,distance,mask = False):
+    """
+    filter function that will take the grid info from the 
+    grid_set type class to get filter distances
+    the array has to be consistent with the grid set class so it can access the x/ydist parameters
+    """
+    # takes the DOT and filters out the geoid harmonics
+    # hopefully can implement variable gradient using 
+    # grid info
+    # can dx/dyres if needed
+    # check if grid_set has grid info
+    if type(mask)==bool:
+        mask = np.ones_like(array)
+    elif (np.shape(mask)[0] != grid_set.m 
+           |np.shape(mask)[1] != grid_set.n):# check mask dimension)
+        print("Mask array incorrect shape, ignoring it")
+        mask = np.ones([grid_set.m,grid_set.n])
+    if not grid_set.gridinfo:
+        print("No grid_set geo grid info - no result")
+        return False
+    in_mn = np.shape(array)
+    if in_mn[0]!=grid_set.m or in_mn[1]!=grid_set.n :
+        print("input array or geo grid_set not consistently shaped")
+        return False
+    else:
+        V = np.empty_like(array) 
+        W = np.empty_like(array) 
+        out_array = np.empty_like(array) 
+        f_sig =[distance/d for d in [grid_set.dxRes,grid_set.dyRes]] # some function of the radius given..
+        V[:,:]=array*mask
+        V[np.isnan(V)]=0
+        VV=gaussian_filter(V,sigma=f_sig)
+
+        W[:,:]=0*array+1
+        W = W*mask
+        W[np.isnan(W)]=0
+        WW=gaussian_filter(W,sigma=f_sig)
+
+        out_array[:,:]=VV/WW
+        out_array[np.isnan(array)] = np.nan
+        
+        return out_array
 
 # takes generic data and regrids it into a data_year
 def regrid_data(data,dates,lons,lats,grid_set,periods,
