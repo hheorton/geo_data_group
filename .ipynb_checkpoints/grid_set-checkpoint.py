@@ -5,13 +5,13 @@
 import numpy as np
 import pandas as pd
 import datetime
-import shutil
-import os
+import copy
 from invoke import run
 from netCDF4 import Dataset
 from numba import jit
 from scipy import stats
 from scipy.ndimage.filters import gaussian_filter
+from astropy.convolution import convolve, Gaussian2DKernel
 import data_year as dy
 from dateutil.relativedelta import relativedelta
 from mpl_toolkits.basemap import Basemap
@@ -100,21 +100,21 @@ class grid_set:
             self.ang_c = np.empty([self.n,self.m])
             self.ang_s = np.empty([self.n,self.m])
             for i in range(self.m-1):
-                 for j in range(self.n):
-                     xdims[j,i] = ellipsoidal_distance(
-                         self.lons[j,i],self.lats[j,i],
-                         self.lons[j,i+1],self.lats[j,i+1],deg=True)
+                for j in range(self.n):
+                    xdims[j,i] = ellipsoidal_distance(
+                        self.lons[j,i],self.lats[j,i],
+                        self.lons[j,i+1],self.lats[j,i+1],deg=True)
             for i in range(self.m):
-                 for j in range(self.n-1):
-                     ydims[j,i] = ellipsoidal_distance(
-                         self.lons[j,i],self.lats[j,i],
-                         self.lons[j+1,i],self.lats[j+1,i],deg=True)
+                for j in range(self.n-1):
+                    ydims[j,i] = ellipsoidal_distance(
+                        self.lons[j,i],self.lats[j,i],
+                        self.lons[j+1,i],self.lats[j+1,i],deg=True)
 
             # then average the available distances i-1,i j-1,j
             for i in range(self.m):
-                 for j in range(self.n):
-                     self.xdist[j,i] = np.nanmean(xdims[j,:i+1][-2:])
-                     self.ydist[j,i] = np.nanmean(ydims[:j+1,i][-2:])
+                for j in range(self.n):
+                    self.xdist[j,i] = np.nanmean(xdims[j,:i+1][-2:])
+                    self.ydist[j,i] = np.nanmean(ydims[:j+1,i][-2:])
             print("Grid distances calculated: ",np.nanmean(self.xdist)," x ",np.nanmean(self.ydist))
                      
             # then  iterate all angles - this is all points plus the extra possible angles
@@ -122,22 +122,23 @@ class grid_set:
             lon_pad = np.pad(self.lons, (1,1), 'linear_ramp', end_values=(np.nan))
             lat_pad = np.pad(self.lats, (1,1), 'linear_ramp', end_values=(np.nan))
             for i in range(self.m):
-                 for j in range(self.n):
-                     # i + angle
-                     xPlus_c,xPlus_s = lon_lat_angle(lon_pad[j+1,i+1],lat_pad[j+1,i+1],
-                                            lon_pad[j+1,i+2],lat_pad[j+1,i+2],return_trig = True,deg=True)
-                     xMins_c,xMins_s = lon_lat_angle(lon_pad[j+1,i+1],lat_pad[j+1,i+1],
-                                            lon_pad[j+1,i],lat_pad[j+1,i],return_trig = True,deg=True)
-                     yPlus_c,yPlus_s = lon_lat_angle(lon_pad[j+1,i+1],lat_pad[j+1,i+1],
-                                            lon_pad[j+2,i+1],lat_pad[j+2,i+1],return_trig = True,deg=True)
-                     yMins_c,yMins_s = lon_lat_angle(lon_pad[j+1,i+1],lat_pad[j+1,i+1],
-                                            lon_pad[j,i+1],lat_pad[j,i+1],return_trig = True,deg=True)
-                     # average all the components first checking the orientation
-                     # if j == 20 and i ==12:
-                         # print([xPlus_c,xMins_c,yPlus_c,yMins_c])
-                         # print([xPlus_s,xMins_s,yPlus_s,yMins_s])
-                     self.ang_c[j,i] = np.nanmean([-xPlus_s, xMins_s, yPlus_c,-yMins_c])
-                     self.ang_s[j,i] = np.nanmean([ xPlus_c, xMins_c, yPlus_s,-yMins_s])
+                for j in range(self.n):
+                    # i + angle
+                    xPlus_c,xPlus_s = lon_lat_angle(lon_pad[j+1,i+1],lat_pad[j+1,i+1],
+                                           lon_pad[j+1,i+2],lat_pad[j+1,i+2],return_trig = True,deg=True)
+                    xMins_c,xMins_s = lon_lat_angle(lon_pad[j+1,i+1],lat_pad[j+1,i+1],
+                                           lon_pad[j+1,i],lat_pad[j+1,i],return_trig = True,deg=True)
+                    yPlus_c,yPlus_s = lon_lat_angle(lon_pad[j+1,i+1],lat_pad[j+1,i+1],
+                                           lon_pad[j+2,i+1],lat_pad[j+2,i+1],return_trig = True,deg=True)
+                    yMins_c,yMins_s = lon_lat_angle(lon_pad[j+1,i+1],lat_pad[j+1,i+1],
+                                           lon_pad[j,i+1],lat_pad[j,i+1],return_trig = True,deg=True)
+                    # average all the components first checking the orientation
+                    # if j == 20 and i ==12:
+                        # print([xPlus_c,xMins_c,yPlus_c,yMins_c])
+                        # print([xPlus_s,xMins_s,yPlus_s,yMins_s])
+                    self.ang_c[j,i] = np.nanmean([ xPlus_s, xMins_s, -yPlus_c,-yMins_c])
+                    self.ang_s[j,i] = np.nanmean([ xPlus_c, xMins_c, -yPlus_s,-yMins_s])
+            print('Angles calculated')
             self.gridinfo = True
         else: print("Grid not defined yet, do that first")
 
@@ -161,20 +162,79 @@ class grid_set:
         else:
             print("No grid to save - run get_grid_info")
 
+    def save_grid_nc(self,file,notes=''):
+        if self.grid and self.gridinfo:
+            # save lat/lon pts 
+            NC_f = Dataset(file, 'w', format='NETCDF4')
+            NC_f.description = 'python grid_set grid file'+notes
+
+            
+            # dimensions
+            NC_f.createDimension('time', None)
+            NC_f.createDimension('x', self.m)
+            NC_f.createDimension('y', self.n)
+
+            # variables
+#             time = NC_f.createVariable('time', 'f8', ('time',))
+            x = NC_f.createVariable('x', 'f4', ('x',))
+            y = NC_f.createVariable('y', 'f4', ('y',))
+            lons  = NC_f.createVariable('lons', 'f8', ('y', 'x',))
+            lats  = NC_f.createVariable('lats', 'f8', ('y', 'x',))
+            xpts  = NC_f.createVariable('xpts', 'f8', ('y', 'x',))
+            ypts  = NC_f.createVariable('ypts', 'f8', ('y', 'x',))
+            ang_c = NC_f.createVariable('ang_c', 'f8',('y', 'x',))
+            ang_s = NC_f.createVariable('ang_s', 'f8',('y', 'x',))
+            xdist = NC_f.createVariable('xdist', 'f8',('y', 'x',))
+            ydist = NC_f.createVariable('ydist', 'f8',('y', 'x',))
+            
+            NC_f.setncattr_string('dxRes',self.dxRes)
+            NC_f.setncattr_string('dyRes',self.dyRes)
+
+            
+            x[:] =self.xpts[0,:]
+            y[:] =self.ypts[:,0]
+            lons[:,:] = self.lons
+            lats[:,:] = self.lats
+            xpts[:,:] = self.xpts
+            ypts[:,:] = self.ypts
+            ang_c[:,:] = self.ang_c
+            ang_s[:,:] = self.ang_s
+            xdist[:,:] = self.xdist
+            ydist[:,:] = self.ydist
+
+
+            NC_f.close()
+#             np.savez(file,
+#                 lats = self.lats,
+#                 lons = self.lons,
+#                 xpts = self.xpts,
+#                 ypts = self.ypts,
+#                 dxRes = self.dxRes,
+#                 dyRes = self.dyRes,
+#                 m = self.m,
+#                 n = self.n,
+#                 ang_c = self.ang_c,
+#                 ang_s = self.ang_s,
+#                 xdist = self.xdist,
+#                 ydist = self.ydist)
+            print("Grid saved in "+file)
+        else:
+            print("No grid to save - run get_grid_info")
+
     def load_grid(self,file):
-        npzfile =  np.load(file)
-        self.lats = npzfile["lats"]
-        self.lons = npzfile["lons"]
-        self.xpts = npzfile["xpts"]
-        self.ypts = npzfile["ypts"]
-        self.dxRes = npzfile["dxRes"] 
-        self.dyRes = npzfile["dyRes"] 
-        self.m = npzfile["m"] 
-        self.n = npzfile["n"] 
-        self.ang_c = npzfile["ang_c"] 
-        self.ang_s = npzfile["ang_s"] 
-        self.xdist = npzfile["xdist"] 
-        self.ydist = npzfile["ydist"] 
+        with np.load(file) as npzfile:
+            self.lats = npzfile["lats"]
+            self.lons = npzfile["lons"]
+            self.xpts = npzfile["xpts"]
+            self.ypts = npzfile["ypts"]
+            self.dxRes = npzfile["dxRes"] 
+            self.dyRes = npzfile["dyRes"] 
+            self.m = npzfile["m"] 
+            self.n = npzfile["n"] 
+            self.ang_c = npzfile["ang_c"] 
+            self.ang_s = npzfile["ang_s"] 
+            self.xdist = npzfile["xdist"] 
+            self.ydist = npzfile["ydist"] 
         self.grid = True
         self.gridinfo = True
         print("Loaded a grid: "+file)
@@ -209,7 +269,42 @@ class grid_set:
                             inf_p = int(inflate/np.hypot(self.xdist[j,i],self.ydist[j,i]))
                             inf_mask[i-inf_p:i+inf_p+1,j-inf_p:j+inf_p+1] = np.nan
                 self.mask = inf_mask
+            elif self.gridinfo:
+                self.mask_inflate = inflate
         self.masked = True
+        
+
+    def inflate_mask(self,inflate = 0.0):
+        # makes a land mask for each point then inflates by a distance m
+        # makes a land mask for each point then inflates by a distance m
+        if self.masked and self.gridinfo:
+            inf_mask = np.ones([self.m,self.n])
+            if (inflate>0.0) and self.gridinfo:
+                self.mask_inflate = inflate
+                for i in range(self.m):
+                    for j in range(self.n):
+                        if np.isnan(self.mask[i,j]):
+                            inf_p = int(inflate/np.hypot(self.xdist[j,i],self.ydist[j,i]))
+                            inf_mask[i-inf_p:i+inf_p+1,j-inf_p:j+inf_p+1] = np.nan
+                self.mask = inf_mask
+            elif self.gridinfo:
+                self.mask_inflate = inflate
+        else:
+            print("Not masked so can't inflate")
+        
+
+    
+    def mask_point(self,lon,lat,inflate = 0):
+        y,x = np.unravel_index(np.argmin(
+        np.abs(self.lons - lon) + 
+        np.abs(self.lats - lat)),
+        np.shape(self.lons))
+        if (inflate>0.0) and self.gridinfo:
+            inf_p = int(inflate/np.hypot(self.xdist[y,x],self.ydist[y,x]))
+            self.mask[x-inf_p:x+inf_p+1,y-inf_p:y+inf_p+1] = np.nan
+        else:
+            self.mask[x,y] = np.nan
+            
 
     def save_mask(self,file):
         if self.masked:
@@ -229,17 +324,19 @@ class grid_set:
             print("Masked already!")
         elif self.gridinfo:
             # save lat/lon pts 
-            npzfile =  np.load(file)
-            self.mask = npzfile["mask"]
-            self.mask_inflate = npzfile["mask_inflate"]
-            m_check = npzfile["m"] 
-            n_check = npzfile["n"] 
+            with np.load(file) as npzfile:
+                self.mask = npzfile["mask"]
+                self.mask_inflate = npzfile["mask_inflate"]
+                m_check = npzfile["m"] 
+                n_check = npzfile["n"] 
             if (m_check == self.m)&(n_check == self.n):
                 print("Loaded mask, ",m_check," x ",n_check," inflated by ",self.mask_inflate)
                 self.masked = True
             else: 
                 print("Gird and mask dimensins inconsistent, check them") 
                 print("Mask",m_check," x ",n_check," Grid, ",self.m," x ",self.n)
+                
+                
 
 def read_nc_single(ncfile,grid_set,lonlatk,valk,fill_lonlat = False):
     """
@@ -300,6 +397,31 @@ def geo_gradient(array,grid_set):
             out_Dax[:,j] = np.gradient(
             array[:,j],temp_space)
         return out_Dax,out_Day
+
+def geo_curl(u,v,grid_set):
+    """
+    curl function that will take the grid info from the 
+    grid_set type class to get gradients 
+    the array has to be consistent with the grid set class so it can access the x/ydist parameters
+    """
+    # check if grid_set has grid info
+    if not grid_set.gridinfo:
+        print("No grid_set geo grid info - no result")
+        return False
+    in_mn = np.shape(u)
+    if in_mn[0]!=grid_set.m or in_mn[1]!=grid_set.n :
+        print("input array or geo grid_set not consistently shaped")
+        return False
+    else:
+        
+        Dvdx = geo_gradient(v,grid_set)[1]
+        Dudy = geo_gradient(u,grid_set)[0]
+
+        zeta = Dvdx - Dudy
+
+        return zeta
+
+    
     
 def de_ripple(array1,array2,rip_filt_std = 1,filt_ring_sig = 5,force_zero = False):
     # find the ripples by subtracting the arrays
@@ -333,7 +455,10 @@ def geo_filter(array,grid_set,distance,mask = False):
     # can dx/dyres if needed
     # check if grid_set has grid info
     if type(mask)==bool:
-        mask = np.ones_like(array)
+        if mask:
+            mask = grid_set.mask
+        else:
+            mask = np.ones_like(array)
     elif (np.shape(mask)[0] != grid_set.m 
            |np.shape(mask)[1] != grid_set.n):# check mask dimension)
         print("Mask array incorrect shape, ignoring it")
@@ -361,6 +486,49 @@ def geo_filter(array,grid_set,distance,mask = False):
 
         out_array[:,:]=VV/WW
         out_array[np.isnan(array)] = np.nan
+        
+        return out_array*mask
+    
+def geo_convolve(array,grid_set,distance,limits,mask = False,set_kernel = False):
+    """
+    filter function that will take the grid info from the 
+    grid_set type class to get filter distances
+    the array has to be consistent with the grid set class so it can access the x/ydist parameters
+    """
+    # takes the DOT and filters out the geoid harmonics
+    # hopefully can implement variable gradient using 
+    # grid info
+    # can dx/dyres if needed
+    # check if grid_set has grid info
+    if type(mask)==bool:
+        if mask:
+            mask = grid_set.mask
+        else:
+            mask = np.ones_like(array)
+    elif (np.shape(mask)[0] != grid_set.m 
+           |np.shape(mask)[1] != grid_set.n):# check mask dimension)
+        print("Mask array incorrect shape, ignoring it")
+        mask = np.ones([grid_set.m,grid_set.n])
+    if not grid_set.gridinfo:
+        print("No grid_set geo grid info - no result")
+        return False
+    if type(set_kernel)==bool:
+        # set normal guassian kernel as a function of grid general dim
+        f_sig =np.mean([distance/d for d in [grid_set.dxRes,grid_set.dyRes]]) 
+        kernel = Gaussian2DKernel(f_sig)
+    else: kernel = set_kernel
+    in_mn = np.shape(array)
+    if in_mn[0]!=grid_set.m or in_mn[1]!=grid_set.n :
+        print("input array or geo grid_set not consistently shaped")
+        return False
+    else:
+        # some function of the radius given..
+        array_2 = copy.copy(array)
+        array_2[array<limits[0]] = np.nan
+        array_2[array>limits[1]] = np.nan 
+        array_2[np.isnan(mask)] = np.nan 
+        
+        out_array = convolve(array_2,kernel,boundary = 'extend')
         
         return out_array
 
@@ -428,8 +596,8 @@ def regrid_vectors(x,y,dates,lons,lats,grid_set,periods,
         orig_c = np.ones_like(lon_a)
         orig_s = np.zeros_like(lon_a)
     else: 
-        orig_c = np.cos(np.deg2rad(vector_angles))
-        orig_s = np.sin(np.deg2rad(vector_angles))
+        orig_c = np.cos(np.deg2rad(vector_angles.T))
+        orig_s = np.sin(np.deg2rad(vector_angles.T))
     # regrid depending upon mplot and grid
     x_d, y_d = grid_set.mplot(lon_a, lat_a)
     for tt in range(n_t):
@@ -445,8 +613,8 @@ def regrid_vectors(x,y,dates,lons,lats,grid_set,periods,
                 method='linear')
         
         # rotating to the new grid
-        new_x_array[tt] = temp_x*grid_set.ang_c + temp_y*grid_set.ang_s 
-        new_y_array[tt] = temp_y*grid_set.ang_c - temp_x*grid_set.ang_s 
+        new_x_array[tt] = temp_x*grid_set.ang_c.T - temp_y*grid_set.ang_s.T 
+        new_y_array[tt] = temp_y*grid_set.ang_c.T + temp_x*grid_set.ang_s.T 
         
     return dy.vec_data_year(new_x_array,new_y_array,dates,periods)
 
@@ -566,4 +734,10 @@ def lon_lat_angle( lon1,lat1,lon2,lat2,deg=False,return_trig = False ):
         
         return angle
 
+def nearest_xy(lon,lat,grid_set,deg=False): 
+    x,y = np.unravel_index(np.argmin(
+        np.abs(grid_set.lons - lon) + 
+        np.abs(grid_set.lats - lat)),
+        np.shape(grid_set.lons))
+    return x,y
     
