@@ -476,7 +476,6 @@ class grid_set:
 
             
             # dimensions
-            NC_f.createDimension('time', None)
             NC_f.createDimension('x', self.m)
             NC_f.createDimension('y', self.n)
 
@@ -484,25 +483,19 @@ class grid_set:
 #             time = NC_f.createVariable('time', 'f8', ('time',))
             x = NC_f.createVariable('x', 'f4', ('x',))
             y = NC_f.createVariable('y', 'f4', ('y',))
-            lons  = NC_f.createVariable('lons', 'f8', ('y', 'x',))
-            lats  = NC_f.createVariable('lats', 'f8', ('y', 'x',))
-            xpts  = NC_f.createVariable('xpts', 'f8', ('y', 'x',))
-            ypts  = NC_f.createVariable('ypts', 'f8', ('y', 'x',))
-            ang_c = NC_f.createVariable('ang_c', 'f8',('y', 'x',))
-            ang_s = NC_f.createVariable('ang_s', 'f8',('y', 'x',))
-            xdist = NC_f.createVariable('xdist', 'f8',('y', 'x',))
-            ydist = NC_f.createVariable('ydist', 'f8',('y', 'x',))
+            lons  = NC_f.createVariable('lons', 'f8', ('x', 'y',))
+            lats  = NC_f.createVariable('lats', 'f8', ('x', 'y',))
+            ang_c = NC_f.createVariable('ang_c', 'f8',('x', 'y',))
+            ang_s = NC_f.createVariable('ang_s', 'f8',('x', 'y',))
+            xdist = NC_f.createVariable('xdist', 'f8',('x', 'y',))
+            ydist = NC_f.createVariable('ydist', 'f8',('x', 'y',))
             
             NC_f.setncattr_string('dxRes',self.dxRes)
             NC_f.setncattr_string('dyRes',self.dyRes)
 
             
-            x[:] =self.xpts[0,:]
-            y[:] =self.ypts[:,0]
             lons[:,:] = self.lons
             lats[:,:] = self.lats
-            xpts[:,:] = self.xpts
-            ypts[:,:] = self.ypts
             ang_c[:,:] = self.ang_c
             ang_s[:,:] = self.ang_s
             xdist[:,:] = self.xdist
@@ -1502,8 +1495,12 @@ class vary_smooth2d():
     varr: array of local row smoothing distances (no. of grid cells, float)
     varc: array of local column smoothing distancese (no. of grid cells, float)
     """
-    def __init__(self,varr,varc,verbos = False):
+    def __init__(self,varr,varc,in_mask=False,verbos = False):
         ii,jj = varc.shape
+        if type(in_mask) == bool:
+            mask = np.ones([ii,jj],dtype = bool)
+        else:
+            mask = in_mask
         if verbos:
             print('Bulding vary smoother, av cell dist = ['+
                   '{:0.1f}'.format(np.nanmean(varr))+', '+ 
@@ -1527,27 +1524,29 @@ class vary_smooth2d():
         for i in range(ii):
             for j in range(jj):
                 ## i,j are the target indicies
+                if mask[i,j] == False: continue
                 ij = np.ravel_multi_index((i,j),(ii,jj))
                 ## i+-varr[i,j]
                 ## j+-varc[i,j]
                 ## are the target indice
                 ## place in the sparse matrix is np.ravel_multi_index((i,j))
                 vij = []
-                for vi in range(i-varr[i,j],i+varr[i,j]+1):
-                    for vj in range(j-varc[i,j],j+varc[i,j]+1):
-                        if (vi in range(ii)) and (vj in range(jj)):
+                vir = range( max(i-varr[i,j], 0), min(i+varr[i,j]+1, ii) )
+                vjr = range( max(j-varc[i,j], 0), min(j+varc[i,j]+1, jj) )
+                for vi in vir:
+                    for vj in vjr:
+                        if mask[vi,vj]:
                             vij.append(np.ravel_multi_index((vi,vj),(ii,jj)))
                 ## here is point for making a different kernel
                 ## current is box
                 weight = 1/np.shape(vij)[0]
-        #         if np.shape(vij)[0] > 1: print(weight)
-                for n,vv in enumerate(vij):
+                for vv in vij:
                     ijl.append(ij)
                     vvl.append(vv)
                     ddl.append(weight)
         if verbos: print("Smooth martix, entries = "+str(len(ijl))
-                        +", mean weights = "+'{:0.2f}'.format(np.nanmean(ddl)))
-        mat1 = sparse.coo_matrix((ddl, (ijl, vvl)))
+                        +", mean weights = "+'{:0.4f}'.format(np.nanmean(ddl)))
+        mat1 = sparse.coo_matrix((ddl, (ijl, vvl)),shape=(ii*jj,ii*jj))
         self.matrix = mat1.tocsr()
         #             matrix[vv,ij] = weight
         #             if vv!=ij:print(vv,ij)
@@ -1579,10 +1578,14 @@ class geo_vary_smooth():
         init distance is the approximate distance we want represented 
         by the local box dimensions
     """
-    def __init__(self,grid_set,distance,verbos=False):
+    def __init__(self,grid_set,distance,verbos=False,mask=False):
         varr = distance/grid_set.xdist
         varc = distance/grid_set.ydist
-        self.Vsm2d = vary_smooth2d(varr,varc,verbos=verbos)
+        if type(mask) == bool and mask:
+            in_mask = np.isfinite(grid_set.mask)
+        else:
+            in_mask = mask
+        self.Vsm2d = vary_smooth2d(varr,varc,verbos=verbos,in_mask=in_mask)
     
     def smooth(self,array):
         return self.Vsm2d.smooth(array)

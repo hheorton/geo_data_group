@@ -128,7 +128,11 @@ class data_year:
         
 
     def __getitem__(self,indx):
-        if (type(indx) == int) or (type(indx) == np.int64) or (type(indx) == slice):
+        if type(indx) == dt.datetime:
+            t_p = self.get_index(indx)
+            m = slice(None)
+            n = slice(None)
+        elif (type(indx) == int) or (type(indx) == np.int64) or (type(indx) == slice):
             t_p = indx
             m = slice(None)
             n = slice(None)
@@ -445,6 +449,7 @@ class data_year:
                         ploc.append(None)
             temp_array = np.empty([p_use])
             pind=0
+            p_count = np.empty([p_use])
             for mn,t in enumerate(pmask):
                 if t:
 #             for mn in range(self.periods):
@@ -460,6 +465,7 @@ class data_year:
                             temp[:,:,:]      = [self.data[i]*mult_array for i in idx if i>=t0 and i<=tE]
                         else:
                             temp[:,:,:]      = [self.data[i] for i in idx if i>=t0 and i<=tE]
+                        p_count[pind] = np.sum([1 for i in idx if i>=t0 and i<=tE])
                         temp_mask[:,:,:] = [mask[i] for i in idx if i>=t0 and i<=tE]
                         temp[temp_mask==False] = np.nan
                         if method=='mean':
@@ -471,6 +477,9 @@ class data_year:
                         elif method=='sum':
                             temp_array[pind] = np.nansum(temp)
                         pind+=1
+            if method=='sum':
+                ### then we need to normalize by no.of time points
+                temp_array = temp_array/p_count
             if full_time:
                 out_array = []
                 for p in ploc:
@@ -549,7 +558,7 @@ class data_year:
 
 
 
-    def clim_map(self,periods=[],mask = False,year_set = [],time_set = []):
+    def clim_map(self,periods=[],mask = False,year_set = [],time_set = [],method = 'mean',calc_mask = False):
         """
         periods is the list of period no.s to use in the map
         ie. periods = [0,1,2] with give the map of average over
@@ -562,9 +571,24 @@ class data_year:
             idx = [self.yrpd[y0:yE+1,mn].compressed() for mn in periods]
             temp_mask = np.sum([mask[j,:,:]
                             for i in idx for j in i if j>=t0 and j<=tE],axis = 0)
-            temp = np.nanmean(
-            [self.data[j] for i in idx for j in i if j>=t0 and j<=tE],
-            axis = 0)
+            if method=='mean' and calc_mask:
+                temp = np.nanmean([self[j] for i in idx for j in i if j>=t0 and j<=tE],axis = 0)
+            elif method=='mean':
+                temp = np.nanmean([self.data[j] for i in idx for j in i if j>=t0 and j<=tE],axis = 0)
+            elif method=='median' and calc_mask:
+                temp = np.nanmedian([self[j] for i in idx for j in i if j>=t0 and j<=tE],axis = 0)
+            elif method=='median':
+                temp = np.nanmedian([self.data[j] for i in idx for j in i if j>=t0 and j<=tE],axis = 0)
+            elif method=='std' and calc_mask:
+                temp = np.nanstd([self[j] for i in idx for j in i if j>=t0 and j<=tE],axis = 0)
+            elif method=='std':
+                temp = np.nanstd([self.data[j] for i in idx for j in i if j>=t0 and j<=tE],axis = 0)
+            elif method=='sum' and calc_mask:
+                ysum = yE - y0 +1
+                temp = np.nansum([self[j] for i in idx for j in i if j>=t0 and j<=tE],axis = 0)/ysum
+            elif method=='sum':
+                ysum = yE - y0 +1
+                temp = np.nansum([self.data[j] for i in idx for j in i if j>=t0 and j<=tE],axis = 0)/ysum
             if np.sum(temp_mask<1)>1:
                 temp[np.where(temp_mask<1)] = np.nan
             return temp
