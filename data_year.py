@@ -713,10 +713,10 @@ class data_year:
                 DY_dates = temp_time)
             self.saved = True
 
-    def save_nc(self,filename,mask = False,grid = False,
+    def save_nc(self,filename,d0, tdim='days',mask = False,grid = False,
                 extra_data = [],save_yrpd=False,add_attr=[],
                 description='default data_year ',data_name = 'dy_data',
-                      year_set = [],time_set = []):
+                      year_set = [],time_set = [],verbos=True):
         import grid_set as gs
         """saves all the DY in an netcdf file
         Works as default with the dy format, all data saved in a single array
@@ -742,7 +742,10 @@ class data_year:
         yrpd_cp.mask[yrpd_cp<t0] = True
         t_use = yrpd_cp.compressed()
         
-        temp_time = [self.dates[t].toordinal() for t in t_use]
+        if tdim == 'days':
+            temp_time = [(self.dates[t] - d0).days for t in t_use]
+        if tdim == 'months':
+            temp_time = [(self.dates[t] - d0).months for t in t_use]
         NC_f = Dataset(filename, 'w', format='NETCDF4')
         NC_f.description = description
             
@@ -761,7 +764,13 @@ class data_year:
             DY_yrpd = NC_f.createVariable('dy_yrpd', 'i8', ('nyrs','periods'))
         e_d = []
         for extra_d in extra_data:
-            e_d.append(NC_f.createVariable(extra_d[1], 'f4', ('time','x','y')))
+            if type(extra_d[0])==vec_data_year:
+                e_d.append([NC_f.createVariable(extra_d[1]+'_x', 'f4', ('time','x','y')),
+                            NC_f.createVariable(extra_d[1]+'_y', 'f4', ('time','x','y'))])
+                if verbos: print('Adding vector data')
+            else:
+                e_d.append(NC_f.createVariable(extra_d[1], 'f4', ('time','x','y')))
+                if verbos: print('Adding scalar data')
 #         DY_yrpd_mask = NC_f.createVariable('dy_yrpd_mask', 'i1', ('nyrs','periods'))
 
         # save a grid too
@@ -773,7 +782,15 @@ class data_year:
         for att in add_attr:
             NC_f.setncattr_string(att[0],att[1])
         # Time format attribute
-        NC_f.setncattr_string('Time dimension','')
+        if tdim == 'days':
+            NC_f.setncattr_string('Time dimension','Days since '+
+                                  d0.strftime('%Y-%m-%d'))
+        if tdim == 'months':
+            NC_f.setncattr_string('Time dimension','Months since '+
+                                  d0.strftime('%Y-%m'))
+        if tdim == 'seconds':
+            NC_f.setncattr_string('Time dimension','days since '+
+                                  d0.strftime('%Y-%m-%dT%H:%M:%S'))
         
         # fill variables
         # if masking make the array a np.ma array with the correct mask
@@ -786,12 +803,19 @@ class data_year:
         DY_time[:] = temp_time
         # save a grid too
         if type(grid) == gs.grid_set:
-            lons[:] = grid.lons.T
-            lats[:] = grid.lats.T
+            lons[:] = grid.lons
+            lats[:] = grid.lats
+            if verbos: print('Adding grid information')
         # now the extra data
         for n,extra_d in enumerate(extra_data):
-            e_d[n] = [extra_d[0].data[t,:,:] for t in t_use]
-        
+            if type(e_d[n]) == list:
+                ## two vec components
+                e_d[n][0][:] = [extra_d[0].x[t,:,:] for t in t_use]
+                e_d[n][1][:] = [extra_d[0].y[t,:,:] for t in t_use]
+                if verbos: print('Filling vector data')
+            else:
+                e_d[n][:] = [extra_d[0].data[t,:,:] for t in t_use]
+                if verbos: print('Filling scalar data')
         NC_f.close()
         
 

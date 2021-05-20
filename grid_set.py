@@ -194,7 +194,6 @@ class grid_set:
     def set_gate_grid(self,lonG,latG,npoints=100,aspect=100):
        # creates a grid depending on wanted resolution 
         x,y = self.mplot(np.array(lonG),np.array(latG))
-        aspect = 100
         xpts = np.linspace(x[0],x[1],npoints)
         ypts = np.linspace(y[0],y[1],npoints)
 
@@ -549,7 +548,7 @@ class grid_set:
             self.mask = np.ones([self.m,self.n])
             for i in range(self.m):
                 for j in range(self.n):
-                    if self.mplot.is_land(self.xpts[j,i],self.ypts[j,i]):
+                    if self.mplot.is_land(self.xpts[i,j],self.ypts[i,j]):
                          self.mask[i,j] = np.nan
             self.masked =True
             self.mask_inflate = 0.0
@@ -564,7 +563,7 @@ class grid_set:
         if self.masked and self.gridinfo:
             inf_mask = np.ones([self.m,self.n])
             if (inflate>0.0) and self.gridinfo:
-                if hasattr(self,mask_inflate):
+                if hasattr(self,'mask_inflate'):
                     self.mask_inflate += inflate
                 else:
                     self.mask_inflate = inflate
@@ -745,22 +744,22 @@ class grid_set:
         stat_append = False
         if append is not False: stat_append = True
             
-        if not hasattr(self, 'edges_x'):
+        if not hasattr(self, 'edges_x') or xy_order!=self.xy_order:
             dims = np.shape(self.xpts)
             self.xy_order = xy_order
-            if   xy_order == 0:
+            if xy_order == 0:
                 self.edges_x = np.zeros(dims[0]+1)
                 self.edges_y = np.zeros(dims[1]+1)
-                self.edges_x[0:-1] = self.xpts[0,:] 
-                self.edges_y[0:-1] = self.ypts[:,0]
+                self.edges_x[0:-1] = self.xpts[:,0] 
+                self.edges_y[0:-1] = self.ypts[0,:]
             elif xy_order == 1:
                 self.edges_x = np.zeros(dims[1]+1)
                 self.edges_y = np.zeros(dims[0]+1)
-                self.edges_x[0:-1] = self.xpts[:,0] 
-                self.edges_y[0:-1] = self.ypts[0,:]
+                self.edges_x[0:-1] = self.xpts[0,:] 
+                self.edges_y[0:-1] = self.ypts[:,0]
             xshift = np.mean(np.diff(self.edges_x))
             yshift = np.mean(np.diff(self.edges_y))
-            self.edges_x[-1] = 2*self.edges_x[-2] - self.edges_y[-3]
+            self.edges_x[-1] = 2*self.edges_x[-2] - self.edges_x[-3]
             self.edges_y[-1] = 2*self.edges_y[-2] - self.edges_y[-3]
             self.edges_x = self.edges_x - xshift
             self.edges_y = self.edges_y - yshift
@@ -780,9 +779,9 @@ class grid_set:
 #         return [self.edges_x-xshift,self.edges_y-yshift]
         ret = stats.binned_statistic_2d(x[msk],y[msk],
                             data_list[msk],statistic=bin_func, 
-                            bins=[slf.edges_x,self.edges_y])
+                            bins=[self.edges_x,self.edges_y])
         #### now return array
-        outarr = ret.statistic.T
+        outarr = ret.statistic
         ### flip outputs if needed
         if ((self.xy_order == 0 and self.descx) 
             or (self.xy_order == 1 and self.descy)):
@@ -1578,13 +1577,13 @@ class geo_vary_smooth():
         init distance is the approximate distance we want represented 
         by the local box dimensions
     """
-    def __init__(self,grid_set,distance,verbos=False,mask=False):
+    def __init__(self,grid_set,distance,verbos=False,in_mask=False):
         varr = distance/grid_set.xdist
         varc = distance/grid_set.ydist
-        if type(mask) == bool and mask:
+        if type(in_mask) == bool and in_mask:
             in_mask = np.isfinite(grid_set.mask)
         else:
-            in_mask = mask
+            in_mask = in_mask
         self.Vsm2d = vary_smooth2d(varr,varc,verbos=verbos,in_mask=in_mask)
     
     def smooth(self,array):
